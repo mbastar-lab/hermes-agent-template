@@ -48,4 +48,25 @@ fi
 # container), so removing the file unconditionally is safe.
 rm -f /data/.hermes/gateway.pid
 
+# Bootstrap the SEO Machine repo onto the persistent volume so the claude-code
+# skill has a working directory containing all the .claude/ commands, agents,
+# skills, context files, and the Python analytics pipeline. Cloned once, then
+# pulled --ff-only on every boot. GITHUB_TOKEN must be a fine-grained PAT with
+# read access to the private repo (generated from the repo-owning account).
+# A git credential helper expands the token at runtime so it is never written
+# to disk in .git/config. Never allowed to abort boot (|| echo).
+if [ -n "${GITHUB_TOKEN}" ]; then
+  git config --global credential.helper \
+    '!f() { echo username=x-access-token; printf "password=%s\n" "${GITHUB_TOKEN}"; }; f'
+  if [ ! -d /data/seomachine/.git ]; then
+    git clone --branch "${SEOMACHINE_BRANCH:-context/rise4-specifics}" \
+      https://github.com/mattrise4/rise4-seomachine.git /data/seomachine \
+      || echo "[start] WARN: SEO repo clone failed"
+  else
+    git -C /data/seomachine pull --ff-only || echo "[start] WARN: SEO repo pull failed"
+  fi
+else
+  echo "[start] NOTE: GITHUB_TOKEN unset — skipping SEO repo bootstrap"
+fi
+
 exec python /app/server.py

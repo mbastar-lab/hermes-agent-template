@@ -65,6 +65,14 @@ RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/NousResearch/h
 COPY requirements.txt /app/requirements.txt
 RUN uv pip install --system --no-cache -r /app/requirements.txt
 
+# Install the Claude Code CLI — the harness that runs the SEO Machine repo's
+# .claude/ commands, subagents, and skills. Node 22 is already present from the
+# build layer above. The binary lives in the image; at runtime `claude` reads
+# its config from $HOME/.claude (= /data/.claude on the volume) and is pointed
+# at any Anthropic-compatible endpoint (e.g. Z.ai GLM) via the ANTHROPIC_BASE_URL
+# / ANTHROPIC_AUTH_TOKEN env vars set on the Railway service — no Anthropic key.
+RUN npm install -g @anthropic-ai/claude-code && rm -rf /root/.npm
+
 RUN mkdir -p /data/.hermes
 
 COPY server.py /app/server.py
