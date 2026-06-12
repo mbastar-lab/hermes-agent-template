@@ -4,7 +4,7 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "/app/start.sh"
-healthcheckPath = "/health"
-healthcheckTimeout = 300
+# Socket Mode has no inbound HTTP, so there is no healthcheck endpoint — Railway
+# treats the long-running worker as healthy while the process is up.
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10

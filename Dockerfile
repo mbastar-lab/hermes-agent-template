@@ -1,97 +1,57 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-# Which hermes-agent revision to install. Accepts any git ref the upstream
-# repo publishes — a release tag (recommended for reproducibility) or a
-# branch name (`main`) for bleeding edge.
-#
-# To bump: check https://github.com/NousResearch/hermes-agent/releases for the
-# newest tag (format `vYYYY.M.D`, optionally with a `.PATCH` suffix, e.g.
-# `v2026.5.29.2`) and update the default below. Use `main` only if you accept
-# that every rebuild can pull arbitrary new upstream commits.
-ARG HERMES_REF=v2026.6.5
+# Which gws (Google Workspace CLI) release to install. The agent uses it to push
+# finished articles into the team's Shared Drive as Google Docs. Verify the asset
+# name/version at https://github.com/googleworkspace/cli/releases when bumping.
+ARG GWS_VERSION=latest
 
-# tini = tiny init that we run as PID 1. Without it, hermes's grandchild
-# processes (MCP stdio servers, git, bun, browser daemons spawned by tools)
-# reparent to PID 1 when their parents exit and pile up as zombies. After
-# weeks of uptime that exhausts the kernel's PID table → "fork: cannot
-# allocate memory" and the container dies. tini reaps zombies in the
-# background and forwards SIGTERM/SIGINT to our entrypoint so Railway's
-# stop signal still triggers our graceful shutdown. Standard container init
-# (same as Docker's `--init` flag and Kubernetes' pause container).
-#
-# Node.js is required only at build time to compile the Hermes React dashboard.
-# We strip the source + apt lists afterwards to keep the image lean.
+# tini = PID-1 init that reaps the git/python/node grandchildren the agent spawns
+# so they don't pile up as zombies over long uptime. Node is required by the
+# Claude Code runtime that claude-agent-sdk drives.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates git tini && \
+    apt-get install -y --no-install-recommends curl ca-certificates git tini jq && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Install hermes-agent (provides the `hermes` CLI) and pre-build its React
-# dashboard so `hermes dashboard` has nothing to build at runtime.
-#
-# [all] in v2026.6.5 no longer pulls in [dev]; messaging platforms, TTS, and
-# other heavy backends are lazy-installed by hermes at first use. We pre-install
-# the ones this template actually uses so first-message latency is instant.
-# `vision` (Pillow) is a soft-dep that is NOT in [all] and is otherwise
-# lazy-installed at first image use: without it hermes can't downscale an
-# oversized image (>5 MB / >8000px), which then bakes into immutable history
-# and bricks the session on Anthropic's non-retryable 400. We bake it in.
-# When bumping HERMES_REF, re-check hermes-agent's pyproject.toml [all] and
-# the extras below against the new release's pyproject.toml.
-RUN git clone --depth 1 --branch ${HERMES_REF} https://github.com/NousResearch/hermes-agent.git /opt/hermes-agent && \
-    cd /opt/hermes-agent && \
-    uv pip install --system --no-cache -e ".[all,messaging,tts-premium,honcho,bedrock,anthropic,edge-tts,hindsight,vision]" && \
-    cd /opt/hermes-agent/web && \
-    npm install --silent && \
-    npm run build && \
-    cd /opt/hermes-agent/ui-tui && \
-    npm install --silent --no-fund --no-audit --progress=false && \
-    npm run build && \
-    rm -rf /opt/hermes-agent/web /opt/hermes-agent/.git /root/.npm
+# The Python Agent SDK drives the Claude Code engine; install the CLI it wraps.
+# Pointed at any Anthropic-compatible endpoint (Z.ai GLM) via ANTHROPIC_BASE_URL /
+# ANTHROPIC_AUTH_TOKEN set as Railway vars — no Anthropic key.
+RUN npm install -g @anthropic-ai/claude-code && rm -rf /root/.npm
 
-# Why pre-build ui-tui (and why we don't delete it after):
-# - The dashboard's embedded Chat tab spawns `node ui-tui/dist/entry.js`
-#   on every WebSocket connect to /api/pty.
-# - Without HERMES_TUI_DIR, hermes's _make_tui_argv falls through to the
-#   npm install + build path (since git-editable installs don't have the
-#   bundled tui_dist/ that PyPI wheels include), adding 30-60s to the
-#   first chat-open and blocking the asyncio event loop.
-# - Pre-building at image time surfaces build failures here rather than
-#   at user request time, and makes first-chat-open instant.
-# - We keep ui-tui/ entirely (node_modules + dist + src) so HERMES_TUI_DIR
-#   can point at it (see below).
+# Install the gws binary (Google Workspace CLI). Best-effort: if the asset name
+# changes upstream the build warns rather than failing, and start.sh re-checks.
+RUN set -eux; \
+    url="$(curl -fsSL https://api.github.com/repos/googleworkspace/cli/releases/${GWS_VERSION} \
+          | jq -r '.assets[].browser_download_url' \
+          | grep -iE 'linux.*(x86_64|amd64)' | grep -viE '\.(sha256|sig)$' | head -n1)"; \
+    if [ -n "$url" ] && [ "$url" != "null" ]; then \
+      curl -fsSL "$url" -o /tmp/gws.pkg; \
+      case "$url" in \
+        *.tar.gz|*.tgz) tar -xzf /tmp/gws.pkg -C /usr/local/bin gws 2>/dev/null || \
+                        (mkdir -p /tmp/gwsx && tar -xzf /tmp/gws.pkg -C /tmp/gwsx && \
+                         find /tmp/gwsx -type f -name gws -exec install -m755 {} /usr/local/bin/gws \;) ;; \
+        *) install -m755 /tmp/gws.pkg /usr/local/bin/gws ;; \
+      esac; \
+      /usr/local/bin/gws --version || echo "[build] WARN: gws installed but --version failed"; \
+    else \
+      echo "[build] WARN: could not resolve a gws linux asset; install it in start.sh"; \
+    fi; \
+    rm -rf /tmp/gws.pkg /tmp/gwsx
 
+WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN uv pip install --system --no-cache -r /app/requirements.txt
 
-# Install the Claude Code CLI — the harness that runs the SEO Machine repo's
-# .claude/ commands, subagents, and skills. Node 22 is already present from the
-# build layer above. The binary lives in the image; at runtime `claude` reads
-# its config from $HOME/.claude (= /data/.claude on the volume) and is pointed
-# at any Anthropic-compatible endpoint (e.g. Z.ai GLM) via the ANTHROPIC_BASE_URL
-# / ANTHROPIC_AUTH_TOKEN env vars set on the Railway service — no Anthropic key.
-RUN npm install -g @anthropic-ai/claude-code && rm -rf /root/.npm
-
-RUN mkdir -p /data/.hermes
-
-COPY server.py /app/server.py
-COPY templates/ /app/templates/
+COPY src/ /app/src/
+COPY hooks/ /app/hooks/
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
+# HOME=/data puts the SDK's session transcripts ($HOME/.claude/projects) on the
+# persistent volume, so thread resume survives redeploys.
 ENV HOME=/data
-ENV HERMES_HOME=/data/.hermes
+ENV PYTHONUNBUFFERED=1
 
-# Points hermes at our pre-built TUI bundle. hermes's _make_tui_argv checks
-# HERMES_TUI_DIR first: if dist/entry.js exists there, it skips the npm
-# install/build entirely. This is the official packager path (Nix uses it too)
-# and avoids the 30-60s npm bootstrap that git-editable installs would otherwise
-# trigger on first /chat connection.
-ENV HERMES_TUI_DIR=/opt/hermes-agent/ui-tui
-
-# tini wraps start.sh so it runs as PID 1's child instead of as PID 1 itself.
-# `-g` propagates signals to the whole process group so `docker stop` /
-# Railway's SIGTERM cleanly terminates the entire tree, not just start.sh.
 ENTRYPOINT ["/usr/bin/tini", "-g", "--"]
 CMD ["/app/start.sh"]
