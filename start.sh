@@ -15,7 +15,9 @@ git config --global user.email "${GIT_AUTHOR_EMAIL:-seo-agent@rise4.com}"
 
 # ── Materialize credential files from base64 env vars (never baked in image) ──
 # Each *_B64 is the base64 of the corresponding JSON/file, set as a Railway var.
-write_b64() { [ -n "$2" ] && printf '%s' "$2" | base64 -d > "$1" && chmod 600 "$1"; }
+# NOTE: must return 0 when the var is empty, else `set -e` aborts the whole
+# script (an empty optional cred like GWS_SA_CREDENTIALS_B64 is normal).
+write_b64() { [ -n "$2" ] || return 0; printf '%s' "$2" | base64 -d > "$1" && chmod 600 "$1"; }
 write_b64 /data/credentials/ga4-credentials.json   "${GA4_CREDENTIALS_B64}"
 write_b64 /data/credentials/gsc-credentials.json   "${GSC_CREDENTIALS_B64}"
 write_b64 /data/credentials/gws-sa.json            "${GWS_SA_CREDENTIALS_B64}"
