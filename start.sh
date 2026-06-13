@@ -5,6 +5,10 @@ set -e
 # $HOME=/data so the SDK writes session transcripts to /data/.claude/projects.
 mkdir -p /data/.claude /data/credentials
 
+# ── Safety net: ensure the gws CLI is present (build installs it via npm) ─────
+command -v gws >/dev/null 2>&1 || npm install -g @googleworkspace/cli >/dev/null 2>&1 \
+  || echo "[start] WARN: gws CLI unavailable — Drive export will fail until fixed"
+
 # ── Git identity for the agent's commits ─────────────────────────────────────
 git config --global user.name  "${GIT_AUTHOR_NAME:-Rise4 SEO Agent}"
 git config --global user.email "${GIT_AUTHOR_EMAIL:-seo-agent@rise4.com}"
