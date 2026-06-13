@@ -25,6 +25,11 @@ WORKSPACE = os.environ.get("AGENT_WORKSPACE", "/data/seomachine")
 # Branch the agent commits generated content to. NEVER the code branch.
 DRAFTS_BRANCH = os.environ.get("AGENT_DRAFTS_BRANCH", "agent/drafts")
 
+# The "Rise4 SEO" Shared Drive (or a folder in it) the agent exports Docs into.
+# Found in the Drive URL: drive.google.com/drive/folders/<THIS_ID>. The gws
+# service account must be a member of this Shared Drive.
+GWS_SHARED_DRIVE_ID = os.environ.get("GWS_SHARED_DRIVE_ID", "")
+
 # Branches the deny-hook must protect from direct push / force-push.
 PROTECTED_BRANCHES = set(
     b.strip()

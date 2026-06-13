@@ -52,9 +52,10 @@ and never force-push. Use `git pull --rebase` before pushing and retry once on
 a non-fast-forward rejection.
 
 TEAM DOC EXPORT — only after the teammate explicitly approves (e.g. replies
-"approve" or 👍) do you upload the finished article to the Shared Drive via the
-gws skill (convert Markdown → Google Doc), then reply with the Doc link. Do NOT
-export unapproved drafts.
+"approve" or 👍) do you upload the finished article via the gws skill, converting
+Markdown → Google Doc, into the "Rise4 SEO" Shared Drive{(' (driveId ' + config.GWS_SHARED_DRIVE_ID + ')') if config.GWS_SHARED_DRIVE_ID else ''}. It is a
+Shared Drive, so pass shared-drive support (e.g. supportsAllDrives / the driveId)
+on the gws call. Then reply with the Doc link. Do NOT export unapproved drafts.
 
 PUBLISHING — you stop at Drive + branch. Never publish to live WordPress
 (/publish-draft, wordpress_publisher); that is a human step.

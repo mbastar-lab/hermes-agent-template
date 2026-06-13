@@ -15,8 +15,14 @@ write_b64() { [ -n "$2" ] && printf '%s' "$2" | base64 -d > "$1" && chmod 600 "$
 write_b64 /data/credentials/ga4-credentials.json   "${GA4_CREDENTIALS_B64}"
 write_b64 /data/credentials/gsc-credentials.json   "${GSC_CREDENTIALS_B64}"
 write_b64 /data/credentials/gws-sa.json            "${GWS_SA_CREDENTIALS_B64}"
-# gws and google libs authenticate headlessly via this service account.
-[ -f /data/credentials/gws-sa.json ] && export GOOGLE_APPLICATION_CREDENTIALS=/data/credentials/gws-sa.json
+# gws + google libs auth headlessly via a service account. Prefer a dedicated
+# gws-sa.json; otherwise reuse the GA4 SA (same identity in this deploy — the
+# GA4 SA's email is the one added to the "Rise4 SEO" Shared Drive).
+if [ -f /data/credentials/gws-sa.json ]; then
+  export GOOGLE_APPLICATION_CREDENTIALS=/data/credentials/gws-sa.json
+elif [ -f /data/credentials/ga4-credentials.json ]; then
+  export GOOGLE_APPLICATION_CREDENTIALS=/data/credentials/ga4-credentials.json
+fi
 
 # ── Bootstrap the seomachine workspace (clone once, ff-only pull after) ───────
 # GITHUB_TOKEN = fine-grained PAT (Contents:RW on rise4-seomachine) from the
