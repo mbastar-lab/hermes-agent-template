@@ -39,9 +39,13 @@ if [ -n "${GITHUB_TOKEN}" ]; then
     '!f() { echo username=x-access-token; printf "password=%s\n" "${GITHUB_TOKEN}"; }; f'
   if [ ! -d "${AGENT_WORKSPACE:-/data/seomachine}/.git" ]; then
     git clone --branch "${SEOMACHINE_BRANCH:-context/rise4-specifics}" \
-      https://github.com/mattrise4/rise4-seomachine.git "${AGENT_WORKSPACE:-/data/seomachine}" \
+      "https://github.com/${SEOMACHINE_REPO:-mbastar/rise4-seomachine}.git" "${AGENT_WORKSPACE:-/data/seomachine}" \
       || echo "[start] WARN: SEO repo clone failed"
   else
+    # Re-point an existing checkout to the canonical URL (the repo moved
+    # mattrise4 -> mbastar; the volume's clone may still reference the old path).
+    git -C "${AGENT_WORKSPACE:-/data/seomachine}" remote set-url origin \
+      "https://github.com/${SEOMACHINE_REPO:-mbastar/rise4-seomachine}.git" 2>/dev/null || true
     git -C "${AGENT_WORKSPACE:-/data/seomachine}" pull --ff-only || echo "[start] WARN: SEO repo pull failed"
   fi
 else
