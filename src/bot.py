@@ -80,31 +80,52 @@ async def _process(event: dict, say, client) -> None:
         await say(text=result.text or "(done)", thread_ts=thread_ts)
 
 
+@app.event("app_mention")
+async def on_app_mention(event, say, client):
+    """Canonical path for @mentions in channels."""
+    if event.get("bot_id"):
+        return
+    await _ensure_bot_identity(client)
+    log.info("app_mention from user=%s channel=%s", event.get("user"), event.get("channel"))
+    asyncio.create_task(_process(event, say, client))
+
+
 @app.event("message")
 async def on_message(event, say, client):
-    # Ignore bot/system messages and edits to avoid loops.
+    """DMs and thread follow-ups. Mentions go through on_app_mention (above) to
+    avoid double-processing when a channel mention fires both events."""
     if event.get("bot_id") or event.get("subtype"):
         return
+    await _ensure_bot_identity(client)
     if _bot_user_id and event.get("user") == _bot_user_id:
         return
 
-    await _ensure_bot_identity(client)
+    text = event.get("text", "")
+    if _mention_re and _mention_re.search(text):
+        return  # handled by on_app_mention
 
     is_dm = event.get("channel_type") == "im"
-    mentions_bot = bool(_mention_re and _mention_re.search(event.get("text", "")))
     thread_ts = event.get("thread_ts") or event["ts"]
     known_thread = await store.get(thread_ts) is not None
-
-    if not (is_dm or mentions_bot or known_thread):
+    if not (is_dm or known_thread):
         return
 
-    # Fire-and-forget so the socket envelope acks immediately.
+    log.info("message (dm=%s known=%s) user=%s", is_dm, known_thread, event.get("user"))
     asyncio.create_task(_process(event, say, client))
 
 
 async def main() -> None:
     config.require_runtime()
-    await store.connect()
+    # DB is best-effort: if it's unreachable we still connect to Slack and run
+    # without thread persistence, rather than dying silently before boot.
+    if config.DATABASE_URL:
+        try:
+            await store.connect()
+            log.info("session store connected")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("session store unavailable (%s) — no thread persistence", exc)
+    else:
+        log.warning("DATABASE_URL unset — running without thread persistence")
     handler = AsyncSocketModeHandler(app, config.SLACK_APP_TOKEN)
     log.info("SEO agent starting (workspace=%s)", config.WORKSPACE)
     await handler.start_async()

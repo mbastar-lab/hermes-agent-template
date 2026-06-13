@@ -64,8 +64,11 @@ AGENT_TURN_TIMEOUT_S = int(os.environ.get("AGENT_TURN_TIMEOUT_S", "3000"))
 
 
 def require_runtime() -> None:
-    """Fail fast at boot if a hard requirement is missing."""
-    for name in ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "DATABASE_URL"):
+    """Fail fast only on what's needed to connect to Slack. DATABASE_URL is
+    intentionally NOT required here — if it's missing/unreachable the bot still
+    connects to Slack and runs without thread persistence (see bot.main), so a
+    DB misconfig can't silently kill the process before it can report anything."""
+    for name in ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"):
         _req(name)
     if not ANTHROPIC_BASE_URL:
         raise RuntimeError(

@@ -33,7 +33,8 @@ class SessionStore:
             await self._pool.close()
 
     async def get(self, thread_ts: str) -> str | None:
-        assert self._pool is not None
+        if self._pool is None:  # DB unavailable — no persistence, start fresh
+            return None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT session_id FROM agent_sessions WHERE thread_ts = $1",
@@ -42,7 +43,8 @@ class SessionStore:
             return row["session_id"] if row else None
 
     async def put(self, thread_ts: str, session_id: str) -> None:
-        assert self._pool is not None
+        if self._pool is None:  # DB unavailable — silently skip persistence
+            return
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
